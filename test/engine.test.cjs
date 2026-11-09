@@ -128,4 +128,36 @@ test('positions rotate across lines', () => {
   const multi = E.available(g, r).filter((p) => Object.values(E.lineMs(g, p, t)).filter((v) => v > 0).length >= 2);
   assert.ok(multi.length >= 9, 'only ' + multi.length + ' players played 2+ lines');
 });
+test('queued position swap waits until Swap Made', () => {
+  const r = roster(); const g = E.newGame('7'); E.populate(g, r, 0, { rand: seeded(12) }); g.phase = 'live';
+  const lb = g.slots.LB, st = g.slots.ST;
+  E.queueSwap(g, r, 'LB', 'ST');
+  assert.strictEqual(g.slots.LB, lb, 'not swapped yet');
+  assert.strictEqual(g.queue.length, 1);
+  E.applyRow(g, r, 'LB', 4 * MIN);
+  assert.strictEqual(g.slots.ST, lb); assert.strictEqual(g.slots.LB, st);
+  assert.strictEqual(g.queue.length, 0); assert.strictEqual(g.lastSubAt, 0, 'swap is not a sub');
+  checkIntegrity(g, r);
+});
+test('swap survives Suggest subs and blocks those spots; All Subs Made applies both', () => {
+  const r = roster(); const g = E.newGame('7'); E.populate(g, r, 0, { rand: seeded(13) }); g.phase = 'live';
+  const lb = g.slots.LB, rb = g.slots.RB;
+  E.queueSwap(g, r, 'LB', 'RB');
+  E.suggest(g, r, 6 * MIN);
+  const subs = g.queue.filter((q) => !q.swap);
+  assert.ok(g.queue.some((q) => q.swap));
+  assert.ok(!subs.some((q) => q.slot === 'LB' || q.slot === 'RB'), 'subs must avoid swapped spots');
+  assert.strictEqual(subs.length, 5, '5 field spots left for 6 bench players');
+  E.applyAll(g, r, 6 * MIN);
+  assert.strictEqual(g.slots.LB, rb); assert.strictEqual(g.slots.RB, lb);
+  checkIntegrity(g, r);
+});
+test('swap row replaces conflicting sub row; sub row dropped if its player leaves', () => {
+  const r = roster(); const g = E.newGame('7'); E.populate(g, r, 0, { rand: seeded(14) }); g.phase = 'live';
+  E.queueManual(g, r, E.benchIds(g, r)[0], 'CM');
+  E.queueSwap(g, r, 'CM', 'ST');
+  assert.strictEqual(g.queue.length, 1); assert.ok(g.queue[0].swap);
+  const st = g.slots.ST; E.removePlayer(g, r, st, MIN); g.out.push(st); E.normalizeQueue(g, r);
+  assert.ok(!g.queue.some((q) => q.swap), 'swap with empty spot is dropped');
+});
 console.log(`\n${pass} passed`);

@@ -293,7 +293,10 @@ function pitch() {
   const g = G();
   const tt = t();
   const qBySlot = {};
-  g.queue.forEach((r) => (qBySlot[r.slot] = r));
+  g.queue.forEach((r) => {
+    qBySlot[r.slot] = r;
+    if (r.swap) qBySlot[r.slot2] = r;
+  });
   const selSlot = ui.sel && ui.sel.kind === 'slot' ? ui.sel.id : null;
   const benchSel = ui.sel && ui.sel.kind === 'bench';
   let h = `<div class="pitch"><div class="mark half"></div><div class="mark circle"></div><div class="mark box"></div>`;
@@ -309,7 +312,7 @@ function pitch() {
       <div class="nm">${pid != null ? nm(pid) : 'empty'}</div>
       ${pid != null ? `<div class="mn" data-ms="${pid}">${fmt(E.playedMs(g, pid, tt))}</div>` : '<div class="mn">&nbsp;</div>'}
       ${s.id === 'GK' && g.gkLock ? '<span class="lock">🔒</span>' : ''}
-      ${q ? `<div class="q">⇄ ${nm(q.inPid)}</div>` : ''}
+      ${q ? `<div class="q">${q.swap ? `↔ ${q.slot === s.id ? q.slot2 : q.slot}` : `⇄ ${nm(q.inPid)}`}</div>` : ''}
     </div>`;
   }
   h += `<button class="gklock ${g.gkLock ? 'on' : ''}" data-a="gklock">${g.gkLock ? '🔒 GK locked' : '🔓 GK subs on'}</button>`;
@@ -326,6 +329,16 @@ function queueCard() {
   if (!g.queue.length)
     h += `<div class="muted tiny" style="padding:4px 0 2px">Nobody queued. Tap <b>Suggest subs</b>, or tap a bench player then a spot on the field.</div>`;
   for (const r of g.queue) {
+    if (r.swap) {
+      const a = g.slots[r.slot];
+      const b = g.slots[r.slot2];
+      h += `<div class="qrow"><div class="who">
+        <div class="in">${nm(a)} ↔ ${nm(b)}</div>
+        <div class="out">swap ${r.slot} ↔ ${r.slot2}</div></div>
+        <button class="x" data-a="unqueue" data-v="${r.slot}" aria-label="Remove">✕</button>
+        <button class="made" data-a="made" data-v="${r.slot}">Swap Made</button></div>`;
+      continue;
+    }
     const out = g.slots[r.slot];
     h += `<div class="qrow"><div class="who">
       <div class="in">${nm(r.inPid)}<span class="pos">${r.slot}</span>${r.manual ? '<span class="tiny muted">manual</span>' : ''}</div>
@@ -343,7 +356,7 @@ function benchCard() {
   const tt = t();
   const bench = E.benchIds(g, S.roster).sort((a, b) => E.playedMs(g, a, tt) - E.playedMs(g, b, tt));
   const queued = {};
-  g.queue.forEach((r) => (queued[r.inPid] = r.slot));
+  g.queue.forEach((r) => { if (!r.swap) queued[r.inPid] = r.slot; });
   let h = `<div class="card"><h3>Bench (${bench.length})</h3>`;
   if (!bench.length) h += `<div class="muted tiny">Everyone's on the field.</div>`;
   h += `<div class="bench">`;
@@ -437,7 +450,7 @@ function renderActionBar() {
   const pid = s.kind === 'bench' ? s.id : g.slots[s.id];
   let msg;
   if (s.kind === 'bench') msg = `<b>${nm(pid)}</b> — tap a spot on the field to ${isLive() ? 'queue her in' : 'put her there'}`;
-  else msg = pid != null ? `<b>${nm(pid)}</b> (${s.id}) — tap a bench player to ${isLive() ? 'queue a sub' : 'swap'}, or another spot to swap` : `<b>${s.id}</b> empty — tap a bench player`;
+  else msg = pid != null ? `<b>${nm(pid)}</b> (${s.id}) — tap a bench player to ${isLive() ? 'queue a sub' : 'swap'}, or another spot to ${isLive() ? 'queue a position swap' : 'swap'}` : `<b>${s.id}</b> empty — tap a bench player`;
   el.innerHTML = `<div class="actionbar"><div class="msg">${msg}</div>
     ${pid != null ? `<button class="danger small" data-a="out" data-v="${pid}">Out for game</button>` : ''}
     <button class="small" data-a="desel">✕</button></div>`;
@@ -458,7 +471,12 @@ function tapSlot(slot) {
   if (s && s.kind === 'bench') return sendIn(s.id, slot);
   if (s && s.kind === 'slot') {
     if (s.id === slot) { ui.sel = null; return render(); }
-    return act(() => { E.swapSlots(g, s.id, slot, t()); ui.sel = null; });
+    // during the game a position swap waits in the queue for confirmation, like a sub
+    return act(() => {
+      if (isLive()) E.queueSwap(g, S.roster, s.id, slot);
+      else E.swapSlots(g, s.id, slot, t());
+      ui.sel = null;
+    });
   }
   ui.sel = { kind: 'slot', id: slot };
   render();

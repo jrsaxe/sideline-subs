@@ -162,46 +162,65 @@
     prune(game);
   }
 
-  // drop queue rows that no longer make sense
+  // queue rows: a sub {inPid, slot, manual} or a position swap {swap: true, slot, slot2, manual: true}
+  const rowSlots = (r) => (r.swap ? [r.slot, r.slot2] : [r.slot]);
+
+  // drop queue rows that no longer make sense; each slot / incoming player appears in at most one row
   function normalizeQueue(game, roster) {
     const bench = new Set(benchIds(game, roster));
     const seenSlot = new Set();
     const seenIn = new Set();
     game.queue = game.queue.filter((r) => {
-      if (!(r.slot in game.slots)) return false;
-      if (!bench.has(r.inPid)) return false;
-      if (seenSlot.has(r.slot) || seenIn.has(r.inPid)) return false;
-      seenSlot.add(r.slot);
-      seenIn.add(r.inPid);
+      const slots = rowSlots(r);
+      if (slots.some((s) => !(s in game.slots))) return false;
+      if (slots.some((s) => seenSlot.has(s))) return false;
+      if (r.swap) {
+        if (r.slot === r.slot2 || game.slots[r.slot] == null || game.slots[r.slot2] == null) return false;
+      } else {
+        if (!bench.has(r.inPid) || seenIn.has(r.inPid)) return false;
+        seenIn.add(r.inPid);
+      }
+      slots.forEach((s) => seenSlot.add(s));
       return true;
     });
   }
 
+  // a new manual row replaces any queued row that touches the same spot(s) or player
   function queueManual(game, roster, inPid, slot) {
-    game.queue = game.queue.filter((r) => r.slot !== slot && r.inPid !== inPid);
+    game.queue = game.queue.filter((r) => !rowSlots(r).includes(slot) && r.inPid !== inPid);
     game.queue.push({ inPid, slot, manual: true });
+    normalizeQueue(game, roster);
+  }
+  function queueSwap(game, roster, a, b) {
+    game.queue = game.queue.filter((r) => !rowSlots(r).some((s) => s === a || s === b));
+    game.queue.push({ swap: true, slot: a, slot2: b, manual: true });
     normalizeQueue(game, roster);
   }
   function unqueue(game, slot) {
     game.queue = game.queue.filter((r) => r.slot !== slot);
   }
+  function applyOne(game, r, t) {
+    if (r.swap) swapSlots(game, r.slot, r.slot2, t);
+    else {
+      placeAt(game, r.slot, r.inPid, t);
+      game.lastSubAt = t;
+    }
+  }
   function applyRow(game, roster, slot, t) {
     normalizeQueue(game, roster);
     const row = game.queue.find((r) => r.slot === slot);
     if (!row) return false;
-    placeAt(game, row.slot, row.inPid, t);
+    applyOne(game, row, t);
     game.queue = game.queue.filter((r) => r !== row);
-    game.lastSubAt = t;
     normalizeQueue(game, roster);
     return true;
   }
   function applyAll(game, roster, t) {
     normalizeQueue(game, roster);
     const rows = game.queue.slice();
-    // everyone queued in comes on; everyone they replace comes off — same instant
-    for (const r of rows) placeAt(game, r.slot, r.inPid, t);
+    // rows never share a slot, so order doesn't matter; all happen at the same instant
+    for (const r of rows) applyOne(game, r, t);
     game.queue = [];
-    if (rows.length) game.lastSubAt = t;
     return rows.length;
   }
 
@@ -314,7 +333,7 @@
     const history = opts.history || [];
     normalizeQueue(game, roster);
     const manual = game.queue.filter((r) => r.manual);
-    const takenSlots = new Set(manual.map((r) => r.slot));
+    const takenSlots = new Set(manual.flatMap(rowSlots));
     const takenIn = new Set(manual.map((r) => r.inPid));
 
     const bench = benchIds(game, roster)
@@ -346,7 +365,7 @@
   // in live mode, queue the best bench players into any empty slots (keeps other rows)
   function queueFillEmpty(game, roster, t) {
     normalizeQueue(game, roster);
-    const takenSlots = new Set(game.queue.map((r) => r.slot));
+    const takenSlots = new Set(game.queue.flatMap(rowSlots));
     const takenIn = new Set(game.queue.map((r) => r.inPid));
     const empty = Object.keys(game.slots).filter((s) => game.slots[s] == null && !takenSlots.has(s));
     const bench = benchIds(game, roster)
@@ -399,7 +418,7 @@
       startStint(game, pid, ns, t);
     }
     prune(game);
-    game.queue = game.queue.filter((r) => r.slot in next);
+    game.queue = game.queue.filter((r) => rowSlots(r).every((x) => x in next));
     reflow(game, roster, t);
   }
 
@@ -435,7 +454,7 @@
   const E = {
     FORMATIONS, LINES, slotDefs, slotDef, newGame, gameMs, halfClockMs, onFieldIds, slotOf, available, benchIds,
     playedMs, lineMs, stintCount, currentStintMs, benchMs, fairShareMs, placeAt, benchSlot, swapSlots,
-    normalizeQueue, queueManual, unqueue, applyRow, applyAll, populate, fillEmptyDirect, suggest, queueFillEmpty,
+    normalizeQueue, queueManual, queueSwap, unqueue, applyRow, applyAll, populate, fillEmptyDirect, suggest, queueFillEmpty,
     removePlayer, reflow, setFormation, startClock, pauseClock, summary, assign,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = E;
