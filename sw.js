@@ -1,5 +1,5 @@
 // Offline cache: serve from cache instantly, refresh in the background (stale-while-revalidate).
-const CACHE = 'subs-v1';
+const CACHE = 'subs-20261108214330';
 const FILES = ['./', './index.html', './engine.js', './manifest.json', './icon-180.png'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
